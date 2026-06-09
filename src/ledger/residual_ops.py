@@ -215,7 +215,8 @@ class LedgerResidual(nn.Module):
 # --------------------------------------------------------------------------------------
 # factory + state helpers
 # --------------------------------------------------------------------------------------
-def build_residual(name: str, dim: int, cfg) -> nn.Module:
+def build_residual(name: str, dim: int, cfg, depth_frac: float = 1.0) -> nn.Module:
+    """depth_frac in [0,1] = this sublayer's fractional depth (0=first, 1=last)."""
     if name == "vanilla":
         return VanillaResidual()
     if name == "hc2":
@@ -223,8 +224,9 @@ def build_residual(name: str, dim: int, cfg) -> nn.Module:
     if name == "delta_only":
         return DeltaResidual(dim, tie_gates=cfg.tie_delta_gates)
     if name == "ledger":
+        commit_bias = cfg.commit_bias_early + depth_frac * (cfg.commit_bias_late - cfg.commit_bias_early)
         return LedgerResidual(dim, commit_budget=cfg.commit_budget, init_vanilla=cfg.init_vanilla,
-                              commit_bias=cfg.commit_bias)
+                              commit_bias=commit_bias)
     raise ValueError(f"unknown residual op: {name!r}")
 
 

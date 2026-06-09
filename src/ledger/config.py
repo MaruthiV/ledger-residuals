@@ -22,7 +22,10 @@ class ModelConfig:
     tie_delta_gates: bool = True  # delta_only baseline ties erase/write into one gate
     gamma: float = 0.0            # ledger decode mix: norm(C + gamma*D)
     commit_budget: Optional[float] = None
-    commit_bias: float = 3.0      # initial commit-gate bias: >0 starts OPEN so C populates from step 0
+    # Depth-scheduled commit-gate bias: commit ~nothing early (deliberate), commit late (answer ready).
+    # Fixes dilution-inside-C (gate-open-everywhere accumulates pre-answer deliberation into C).
+    commit_bias_early: float = -4.0
+    commit_bias_late: float = 4.0
     init_vanilla: bool = True     # start near vanilla (stability + anti-"just HC")
 
 

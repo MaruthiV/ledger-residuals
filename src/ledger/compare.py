@@ -35,7 +35,7 @@ PRESETS = {
     "hc2":           dict(residual="hc2"),
     "delta_only":    dict(residual="delta_only", tie_delta_gates=True),
     "suppress_only": dict(residual="vanilla", qk_norm=True),
-    "ledger":        dict(residual="ledger", gamma=0.0, commit_bias=3.0),  # decode-from-C, gate starts open
+    "ledger":        dict(residual="ledger", gamma=0.0),  # decode-from-C; commit gate depth-scheduled
 }
 K_SWEEP = [0, 1, 2, 4, 8, 12, 16, 24, 32]
 
