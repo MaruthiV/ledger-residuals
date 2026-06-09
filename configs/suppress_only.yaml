@@ -1,0 +1,16 @@
+# The artifact-camp foil: suppress massive activations (QK-norm) WITHOUT a functional
+# commitment channel. H2 predicts this is <= vanilla on revision-heavy capability.
+batch_size: 64
+max_steps: 3000
+lr: 3.0e-4
+device: auto
+log_every: 100
+out_dir: outputs/toy/suppress_only
+model:
+  n_layer: 4
+  n_head: 4
+  dim: 128
+  block_size: 128
+  mlp_mult: 4
+  residual: vanilla
+  qk_norm: true

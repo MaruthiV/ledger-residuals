@@ -1,0 +1,19 @@
+# Ledger Residuals: erasable Deliberation + protected, decode-only Commitment.
+# gamma annealed 1->0 over warmup so the model starts ~vanilla and learns to commit into C.
+batch_size: 64
+max_steps: 3000
+lr: 3.0e-4
+device: auto
+log_every: 100
+warmup_gamma_steps: 800
+out_dir: outputs/toy/ledger
+model:
+  n_layer: 4
+  n_head: 4
+  dim: 128
+  block_size: 128
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0
+  commit_budget: null
+  init_vanilla: true

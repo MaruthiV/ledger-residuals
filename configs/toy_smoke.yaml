@@ -1,0 +1,19 @@
+# Tiny CPU smoke test — proves the training loop runs end-to-end in seconds.
+#   python -m ledger.train --config configs/toy_smoke.yaml
+batch_size: 32
+max_steps: 50
+lr: 3.0e-3
+device: cpu
+log_every: 10
+min_events: 4
+max_events: 10
+warmup_gamma_steps: 20
+out_dir: outputs/smoke
+model:
+  n_layer: 2
+  n_head: 2
+  dim: 64
+  block_size: 48
+  mlp_mult: 2
+  residual: ledger
+  gamma: 0.0

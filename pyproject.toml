@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ledger-residuals"
+version = "0.0.1"
+description = "Ledger Residuals: an asymmetric two-stream transformer residual (erasable Deliberation + protected Commitment)."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "numpy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# Installed inside the Modal image for GPU runs (not needed for local CPU smoke tests).
+modal = ["modal", "wandb", "datasets"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
