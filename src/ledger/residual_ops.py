@@ -151,7 +151,8 @@ class LedgerResidual(nn.Module):
     """
     n_streams = 2
 
-    def __init__(self, dim: int, commit_budget: Optional[float] = None, init_vanilla: bool = True):
+    def __init__(self, dim: int, commit_budget: Optional[float] = None, init_vanilla: bool = True,
+                 commit_bias: float = 3.0):
         super().__init__()
         # Deliberation gates (decoupled erase/write)
         self.w_e = nn.Linear(dim, dim)
@@ -163,6 +164,8 @@ class LedgerResidual(nn.Module):
         self.P = nn.Linear(dim, dim, bias=False)     # promotion D -> C
         self.lam = nn.Parameter(torch.zeros(dim))    # read coupling C -> D input (init 0)
         self.commit_budget = commit_budget
+        self.commit_bias = commit_bias               # >0 => gate starts OPEN so C populates from step 0
+        self.last_commit = None  # mean commit-gate value, set each forward (logging + sparsity penalty)
         if init_vanilla:
             self._init_stable()
 
@@ -176,6 +179,7 @@ class LedgerResidual(nn.Module):
         k = F.normalize(self.w_k(u), dim=-1)
         D = D - beta_e * (k * (k * D).sum(-1, keepdim=True)) + beta_w * self.g(y)
         c = torch.sigmoid(self.w_c(u))               # (B, T, 1)
+        self.last_commit = c.mean()                  # grad-connected; consumed by the model's aux
         C = C + c * self.P(D)
         if self.commit_budget is not None:
             scale = torch.clamp(self.commit_budget / (C.norm(dim=-1, keepdim=True) + 1e-6), max=1.0)
@@ -191,9 +195,9 @@ class LedgerResidual(nn.Module):
         # Start near vanilla but trainable: D adds (mostly) like a residual, C commits little.
         _set_identity(self.g)
         _set_identity(self.P)
-        self.w_e.weight.zero_(); self.w_e.bias.fill_(-3.0)   # low erase
-        self.w_w.weight.zero_(); self.w_w.bias.fill_(+3.0)   # high write
-        self.w_c.weight.zero_(); self.w_c.bias.fill_(-3.0)   # commit gate starts low but trainable
+        self.w_e.weight.zero_(); self.w_e.bias.fill_(-3.0)            # low erase
+        self.w_w.weight.zero_(); self.w_w.bias.fill_(+3.0)           # high write
+        self.w_c.weight.zero_(); self.w_c.bias.fill_(self.commit_bias)  # start OPEN (>0) so C fills from step 0
         self.lam.zero_()
 
     @torch.no_grad()
@@ -219,7 +223,8 @@ def build_residual(name: str, dim: int, cfg) -> nn.Module:
     if name == "delta_only":
         return DeltaResidual(dim, tie_gates=cfg.tie_delta_gates)
     if name == "ledger":
-        return LedgerResidual(dim, commit_budget=cfg.commit_budget, init_vanilla=cfg.init_vanilla)
+        return LedgerResidual(dim, commit_budget=cfg.commit_budget, init_vanilla=cfg.init_vanilla,
+                              commit_bias=cfg.commit_bias)
     raise ValueError(f"unknown residual op: {name!r}")
 
 

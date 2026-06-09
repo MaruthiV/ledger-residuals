@@ -38,6 +38,7 @@ class GPT(nn.Module):
         self.cfg = cfg
         self.residual = cfg.residual
         self.gamma = cfg.gamma  # decode mix for ledger: norm(C + gamma*D); annealed during training
+        self.aux = {}           # per-forward diagnostics (e.g. commit-gate stats for ledger)
 
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.dim)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.dim)
@@ -84,6 +85,14 @@ class GPT(nn.Module):
         state = init_state(self.residual, x)
         for sl in self.layers:
             state = sl(state)
+
+        commits = [sl.res.last_commit for sl in self.layers
+                   if getattr(sl.res, "last_commit", None) is not None]
+        self.aux = (
+            {"commit_rate": torch.stack(commits).mean(),
+             "commit_per_layer": [c.item() for c in commits]}
+            if commits else {}
+        )
 
         g = self.gamma if gamma is None else gamma
         h = self.final_norm(decode_state(self.residual, state, g))

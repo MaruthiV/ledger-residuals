@@ -57,6 +57,8 @@ def train(cfg: TrainConfig):
             gamma = max(0.0, 1.0 - step / cfg.warmup_gamma_steps)
 
         logits, loss = model(ids, tgt, gamma=gamma)
+        if cfg.commit_sparsity > 0 and "commit_rate" in model.aux:
+            loss = loss + cfg.commit_sparsity * model.aux["commit_rate"]
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -65,8 +67,10 @@ def train(cfg: TrainConfig):
         if step % cfg.log_every == 0 or step == cfg.max_steps - 1:
             acc = query_accuracy(logits, tgt)
             gtxt = f"{gamma:.2f}" if gamma is not None else "-"
-            print(f"step {step:5d} | loss {loss.item():.4f} | query_acc {acc:.3f} | gamma {gtxt}")
-            history.append({"step": step, "loss": loss.item(), "acc": acc})
+            cpl = model.aux.get("commit_per_layer")
+            ctxt = f" | commit {[round(x, 2) for x in cpl]}" if cpl else ""
+            print(f"step {step:5d} | loss {loss.item():.4f} | query_acc {acc:.3f} | gamma {gtxt}{ctxt}")
+            history.append({"step": step, "loss": loss.item(), "acc": acc, "commit_per_layer": cpl})
 
     return model, history
 

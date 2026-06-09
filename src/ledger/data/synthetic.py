@@ -99,3 +99,63 @@ def make_batch(task: CommitReviseTask, batch_size: int, block_size: int, rng: ra
         ids_b.append(ids + [task.PAD] * pad)
         tgt_b.append(tgt + [-100] * pad)
     return torch.tensor(ids_b, dtype=torch.long), torch.tensor(tgt_b, dtype=torch.long)
+
+
+# --------------------------------------------------------------------------------------
+# Controlled retention probe: hold a slot's value across EXACTLY k distractor events.
+# This is the eval axis for Go/No-Go #1 — accuracy vs #distractors. The protected-channel
+# thesis predicts ledger stays flat as k grows while vanilla/hc2/delta degrade, and that
+# suppress_only is <= vanilla.
+# --------------------------------------------------------------------------------------
+def _retention_example(task: CommitReviseTask, k: int, rng: random.Random):
+    slots = [0] * task.n_slots
+    ids: List[int] = []
+
+    def emit(op, s, v):
+        ids.extend([op, task.slot0 + s, task.val0 + v])
+
+    # short warmup context across slots
+    for _ in range(rng.randint(2, 4)):
+        s, v = rng.randrange(task.n_slots), rng.randrange(task.n_vals)
+        if rng.random() < 0.6:
+            slots[s] = (slots[s] + v) % task.n_vals
+            emit(task.SET, s, v)
+        else:
+            emit(task.NOISE, s, v)
+
+    # the slot under test gets a defining SET; its value must now survive k distractors
+    s = rng.randrange(task.n_slots)
+    v = rng.randrange(task.n_vals)
+    slots[s] = (slots[s] + v) % task.n_vals
+    emit(task.SET, s, v)
+    target_val = slots[s]
+
+    # k distractors that must NOT change slot s (NOISE anywhere, or SET to other slots)
+    others = [x for x in range(task.n_slots) if x != s]
+    for _ in range(k):
+        if rng.random() < 0.5 or not others:
+            ss, vv = rng.randrange(task.n_slots), rng.randrange(task.n_vals)
+            emit(task.NOISE, ss, vv)
+        else:
+            ss, vv = rng.choice(others), rng.randrange(task.n_vals)
+            slots[ss] = (slots[ss] + vv) % task.n_vals
+            emit(task.SET, ss, vv)
+
+    emit(task.QUERY, s, target_val)
+    answer_index = len(ids) - 1  # the value token to predict
+    return ids, answer_index
+
+
+def make_retention_batch(task: CommitReviseTask, k: int, batch_size: int, block_size: int, rng: random.Random):
+    """Batch of retention probes with exactly k distractors after the defining SET."""
+    ids_b, tgt_b = [], []
+    for _ in range(batch_size):
+        ids, ans = _retention_example(task, k, rng)
+        if len(ids) > block_size:
+            raise ValueError(f"retention example (k={k}) length {len(ids)} > block_size {block_size}")
+        tgt = [-100] * len(ids)
+        tgt[ans - 1] = ids[ans]  # predict the answer value from the [.., QUERY, slot] prefix
+        pad = block_size - len(ids)
+        ids_b.append(ids + [task.PAD] * pad)
+        tgt_b.append(tgt + [-100] * pad)
+    return torch.tensor(ids_b, dtype=torch.long), torch.tensor(tgt_b, dtype=torch.long)

@@ -22,6 +22,7 @@ class ModelConfig:
     tie_delta_gates: bool = True  # delta_only baseline ties erase/write into one gate
     gamma: float = 0.0            # ledger decode mix: norm(C + gamma*D)
     commit_budget: Optional[float] = None
+    commit_bias: float = 3.0      # initial commit-gate bias: >0 starts OPEN so C populates from step 0
     init_vanilla: bool = True     # start near vanilla (stability + anti-"just HC")
 
 
@@ -42,6 +43,7 @@ class TrainConfig:
     max_steps: int = 2000
     grad_clip: float = 1.0
     warmup_gamma_steps: int = 0   # anneal ledger gamma 1->0 over these steps (0 = use model.gamma fixed)
+    commit_sparsity: float = 0.0  # alpha * mean(commit gate): the ledger gate-collapse guard
     # runtime
     seed: int = 0
     device: str = "auto"          # auto | cpu | mps | cuda
