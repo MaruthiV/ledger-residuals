@@ -1,0 +1,24 @@
+# Decisive mechanistic run: GPT-2-BPE, ~160M params, depth 12, FineWeb-Edu. This is the regime
+# where Sun-style massive activations actually emerge. The sweep entrypoint overrides residual.
+#   modal run modal_lm.py::sweep --config configs/lm_125m.yaml
+data: fineweb
+tokenizer: gpt2
+max_tokens: 400000000
+val_tokens: 4000000
+batch_size: 24
+max_steps: 14000
+warmup_steps: 300
+log_every: 500
+eval_every: 3500
+commit_sparsity: 0.02
+device: auto
+out_dir: outputs/lm125
+model:
+  n_layer: 12
+  n_head: 12
+  dim: 768
+  block_size: 1024
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0
+  gate_rank: 64

@@ -46,6 +46,30 @@ def _set_identity(linear: nn.Linear) -> None:
             linear.bias.zero_()
 
 
+class _LowRank(nn.Module):
+    """dim->dim map via up(down(x)); a rank-r factorization that keeps ledger params ~vanilla.
+    r<=0 or r>=dim falls back to a single full Linear. `zero_out(b)` pins the output to a constant
+    bias b (used for the stable init and the exact vanilla-reduction corner)."""
+
+    def __init__(self, dim: int, r: int, bias: bool = True):
+        super().__init__()
+        self.lowrank = bool(r and 0 < r < dim)
+        if self.lowrank:
+            self.down = nn.Linear(dim, r, bias=False)
+            self.up = nn.Linear(r, dim, bias=bias)
+        else:
+            self.up = nn.Linear(dim, dim, bias=bias)
+
+    def forward(self, x):
+        return self.up(self.down(x)) if self.lowrank else self.up(x)
+
+    @torch.no_grad()
+    def zero_out(self, bias_val=None):
+        self.up.weight.zero_()
+        if bias_val is not None and self.up.bias is not None:
+            self.up.bias.fill_(bias_val)
+
+
 # --------------------------------------------------------------------------------------
 # vanilla
 # --------------------------------------------------------------------------------------
@@ -152,16 +176,17 @@ class LedgerResidual(nn.Module):
     n_streams = 2
 
     def __init__(self, dim: int, commit_budget: Optional[float] = None, init_vanilla: bool = True,
-                 commit_bias: float = 3.0):
+                 commit_bias: float = 3.0, gate_rank: int = 64):
         super().__init__()
-        # Deliberation gates (decoupled erase/write)
-        self.w_e = nn.Linear(dim, dim)
-        self.w_w = nn.Linear(dim, dim)
-        self.w_k = nn.Linear(dim, dim, bias=False)
-        self.g = nn.Linear(dim, dim, bias=False)
+        r = gate_rank
+        # Deliberation gates (decoupled erase/write), low-rank to keep params ~vanilla
+        self.w_e = _LowRank(dim, r, bias=True)
+        self.w_w = _LowRank(dim, r, bias=True)
+        self.w_k = _LowRank(dim, r, bias=False)
+        self.g_delta = _LowRank(dim, r, bias=False)  # g(y) = y + g_delta(y); identity when zeroed
         # Commitment
         self.w_c = nn.Linear(dim, 1)                 # scalar commit gate
-        self.P = nn.Linear(dim, dim, bias=False)     # promotion D -> C
+        self.P_delta = _LowRank(dim, r, bias=False)  # P(D) = D + P_delta(D); identity when zeroed
         self.lam = nn.Parameter(torch.zeros(dim))    # read coupling C -> D input (init 0)
         self.commit_budget = commit_budget
         self.commit_bias = commit_bias               # >0 => gate starts OPEN so C populates from step 0
@@ -177,10 +202,10 @@ class LedgerResidual(nn.Module):
         beta_e = torch.sigmoid(self.w_e(u))
         beta_w = torch.sigmoid(self.w_w(u))
         k = F.normalize(self.w_k(u), dim=-1)
-        D = D - beta_e * (k * (k * D).sum(-1, keepdim=True)) + beta_w * self.g(y)
+        D = D - beta_e * (k * (k * D).sum(-1, keepdim=True)) + beta_w * (y + self.g_delta(y))
         c = torch.sigmoid(self.w_c(u))               # (B, T, 1)
         self.last_commit = c.mean()                  # grad-connected; consumed by the model's aux
-        C = C + c * self.P(D)
+        C = C + c * (D + self.P_delta(D))
         if self.commit_budget is not None:
             scale = torch.clamp(self.commit_budget / (C.norm(dim=-1, keepdim=True) + 1e-6), max=1.0)
             C = C * scale
@@ -193,21 +218,21 @@ class LedgerResidual(nn.Module):
     @torch.no_grad()
     def _init_stable(self):
         # Start near vanilla but trainable: D adds (mostly) like a residual, C commits little.
-        _set_identity(self.g)
-        _set_identity(self.P)
-        self.w_e.weight.zero_(); self.w_e.bias.fill_(-3.0)            # low erase
-        self.w_w.weight.zero_(); self.w_w.bias.fill_(+3.0)           # high write
+        self.g_delta.zero_out()   # g(y) = y (identity)
+        self.P_delta.zero_out()   # P(D) = D (identity)
+        self.w_e.zero_out(-3.0)   # beta_e = sigmoid(-3) low erase
+        self.w_w.zero_out(+3.0)   # beta_w = sigmoid(+3) high write
         self.w_c.weight.zero_(); self.w_c.bias.fill_(self.commit_bias)  # start OPEN (>0) so C fills from step 0
         self.lam.zero_()
 
     @torch.no_grad()
     def set_vanilla_corner(self):
         # Hard pin for the degeneracy test: D-update -> pure addition, C stays empty.
-        self.w_e.weight.zero_(); self.w_e.bias.fill_(-_BIG)  # beta_e ≈ 0
-        self.w_w.weight.zero_(); self.w_w.bias.fill_(+_BIG)  # beta_w ≈ 1
-        _set_identity(self.g)                                # write = y => D <- D + y
+        self.w_e.zero_out(-_BIG)  # beta_e ≈ 0
+        self.w_w.zero_out(+_BIG)  # beta_w ≈ 1
+        self.g_delta.zero_out()   # g(y) = y => D <- D + y
         self.w_c.weight.zero_(); self.w_c.bias.fill_(-_BIG)  # c ≈ 0 => C stays 0
-        _set_identity(self.P)
+        self.P_delta.zero_out()   # P(D) = D
         self.lam.zero_()
         # With gamma=1 at decode: norm(C + 1·D) = norm(D) = vanilla h.
 
@@ -226,7 +251,7 @@ def build_residual(name: str, dim: int, cfg, depth_frac: float = 1.0) -> nn.Modu
     if name == "ledger":
         commit_bias = cfg.commit_bias_early + depth_frac * (cfg.commit_bias_late - cfg.commit_bias_early)
         return LedgerResidual(dim, commit_budget=cfg.commit_budget, init_vanilla=cfg.init_vanilla,
-                              commit_bias=commit_bias)
+                              commit_bias=commit_bias, gate_rank=cfg.gate_rank)
     raise ValueError(f"unknown residual op: {name!r}")
 
 

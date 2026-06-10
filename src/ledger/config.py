@@ -26,6 +26,7 @@ class ModelConfig:
     # Fixes dilution-inside-C (gate-open-everywhere accumulates pre-answer deliberation into C).
     commit_bias_early: float = -4.0
     commit_bias_late: float = 4.0
+    gate_rank: int = 64           # low-rank factor for ledger gates (keeps params ~vanilla; 0 = full-rank)
     init_vanilla: bool = True     # start near vanilla (stability + anti-"just HC")
 
 

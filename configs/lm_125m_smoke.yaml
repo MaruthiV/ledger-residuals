@@ -1,0 +1,24 @@
+# Modal smoke at the REAL 160M model size (few steps) — validates GPT-2 BPE on Modal + A100
+# memory at dim768/block1024 before the long run.
+#   modal run modal_lm.py::main --config configs/lm_125m_smoke.yaml
+data: fineweb
+tokenizer: gpt2
+max_tokens: 4000000
+val_tokens: 500000
+batch_size: 16
+max_steps: 15
+warmup_steps: 3
+log_every: 5
+eval_every: 8
+commit_sparsity: 0.02
+device: auto
+out_dir: outputs/lm125_smoke
+model:
+  n_layer: 12
+  n_head: 12
+  dim: 768
+  block_size: 1024
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0
+  gate_rank: 64

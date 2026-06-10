@@ -37,7 +37,7 @@ def _make_cfg(config_yaml: str, override: dict | None = None, max_steps=None):
     return cfg
 
 
-@app.function(image=image, gpu="A100", timeout=6 * 3600, volumes={"/data": data_vol, "/ckpts": ckpt_vol})
+@app.function(image=image, gpu="A100-80GB", timeout=6 * 3600, volumes={"/data": data_vol, "/ckpts": ckpt_vol})
 def run_lm(config_yaml: str, override: dict | None = None, max_steps=None):
     from ledger.train_lm import train_lm
 
@@ -46,7 +46,7 @@ def run_lm(config_yaml: str, override: dict | None = None, max_steps=None):
     ckpt_vol.commit()
     last = history[-1] if history else {}
     return {"residual": cfg.model.residual, "qk_norm": cfg.model.qk_norm, "n_layer": cfg.model.n_layer,
-            "val_loss": last.get("val_loss")}
+            "val_loss": last.get("val_loss"), "trace": last.get("trace")}
 
 
 @app.local_entrypoint()
@@ -56,16 +56,40 @@ def main(config: str, max_steps: int = None, gpu: str = "A100"):
     print(run_lm.remote(config_yaml, max_steps=max_steps))
 
 
+@app.function(image=image, timeout=8 * 3600, volumes={"/data": data_vol, "/ckpts": ckpt_vol})
+def run_sweep_remote(config_yaml: str, base_out: str, max_steps=None):
+    """Remote orchestrator. Triggered as a SINGLE function from the local entrypoint, so under
+    `--detach` it survives a client disconnect; it spawns the 3 configs as fire-and-forget remote
+    children (which also survive) and saves combined results to the volume. This is what makes the
+    run safe to walk away from (close the laptop)."""
+    import json
+    import os
+
+    overrides = [
+        {"out_dir": f"{base_out}/vanilla", "model": {"residual": "vanilla"}},
+        {"out_dir": f"{base_out}/suppress", "model": {"residual": "vanilla", "qk_norm": True}},
+        {"out_dir": f"{base_out}/ledger", "model": {"residual": "ledger", "gamma": 0.0}},
+    ]
+    calls = [(ov["out_dir"].rsplit("/", 1)[-1], run_lm.spawn(config_yaml, override=ov, max_steps=max_steps))
+             for ov in overrides]
+    results = {name: call.get() for name, call in calls}  # children persist to /ckpts independently too
+    os.makedirs(f"/ckpts/{base_out}", exist_ok=True)
+    with open(f"/ckpts/{base_out}/sweep_results.json", "w") as fh:
+        json.dump(results, fh)
+    ckpt_vol.commit()
+    return {k: {"val_loss": v.get("val_loss"), "residual": v.get("residual"), "qk_norm": v.get("qk_norm")}
+            for k, v in results.items()}
+
+
 @app.local_entrypoint()
 def sweep(config: str, max_steps: int = None):
-    """Run the three canonical configs in parallel (matched everything but the residual op)."""
+    """Fire-and-forget the remote orchestrator with .spawn() so the whole run survives the local
+    process exiting / the laptop closing. Results land in the volume; retrieve when back."""
+    import yaml
+
     with open(config) as fh:
         config_yaml = fh.read()
-    overrides = [
-        {"out_dir": "outputs/lm/vanilla", "model": {"residual": "vanilla"}},
-        {"out_dir": "outputs/lm/suppress", "model": {"residual": "vanilla", "qk_norm": True}},
-        {"out_dir": "outputs/lm/ledger", "model": {"residual": "ledger", "gamma": 0.0}},
-    ]
-    calls = [run_lm.spawn(config_yaml, override=ov, max_steps=max_steps) for ov in overrides]
-    for c in calls:
-        print(c.get())
+    base_out = (yaml.safe_load(config_yaml) or {}).get("out_dir", "outputs/lm")
+    call = run_sweep_remote.spawn(config_yaml, base_out, max_steps)
+    print("SPAWNED orchestrator | function-call id:", call.object_id)
+    print(f"results -> volume ledger-ckpts:/ckpts/{base_out}/sweep_results.json (+ per-config JSONs)")

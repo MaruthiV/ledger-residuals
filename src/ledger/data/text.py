@@ -75,15 +75,19 @@ def load_token_ids(source: str, tokenizer, max_tokens: int, seed: int = 0) -> to
         ids = tokenizer.encode(text)[:max_tokens]
         return torch.tensor(ids, dtype=torch.long)
     if source == "fineweb":
+        import numpy as np
         from datasets import load_dataset  # guarded: only available on Modal image
         ds = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
-        ids: List[int] = []
+        chunks, total = [], 0  # numpy chunks avoid a multi-GB Python int list at BPE scale
         for ex in ds:
-            ids.extend(tokenizer.encode(ex["text"]))
-            ids.append(tokenizer.eot)
-            if len(ids) >= max_tokens:
+            arr = np.fromiter(tokenizer.encode(ex["text"]), dtype=np.int32)
+            chunks.append(arr)
+            chunks.append(np.array([tokenizer.eot], dtype=np.int32))
+            total += len(arr) + 1
+            if total >= max_tokens:
                 break
-        return torch.tensor(ids[:max_tokens], dtype=torch.long)
+        ids = np.concatenate(chunks)[:max_tokens]
+        return torch.from_numpy(ids.astype(np.int64))
     raise ValueError(f"unknown data source {source!r}")
 
 

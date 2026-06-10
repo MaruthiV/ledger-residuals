@@ -17,17 +17,31 @@ from .residual_ops import build_residual, init_state, decode_state
 def _act_stats(x) -> dict:
     """Massive-activation diagnostics for one stream (Sun et al. 2024 conventions).
 
-    - norm     : mean per-token L2 norm
-    - maxmed   : mean (max|x| / median|x|)  -- scale-free MA proxy
-    - n_out50  : mean count of dims with |x| >= 50x the token's median |x|  (scale-free outliers)
-    - n_sun    : mean count of dims that are 'massive' by Sun's absolute rule (|x|>100 AND >=1000x median)
+    x: (B, T, d). Returns norm-confounded AND norm-independent measures:
+    - norm        : mean per-token L2 norm
+    - maxmed      : mean (max|x| / median|x|)            -- ratio (confounded by norm growth)
+    - absmax      : mean max|x|                           -- RAW magnitude (un-confounded)
+    - kurtosis    : mean excess kurtosis over dims        -- heavy-tail/outlier measure (scale-free)
+    - feat_maxmed : max_dim(mean_tokens|x|) / median      -- FIXED-dimension signature (the true Sun MA:
+                    a few input-agnostic dims with persistently large magnitude)
+    - n_out50     : mean #dims with |x| >= 50x token median
+    - n_sun       : mean #dims 'massive' by Sun's absolute rule (|x|>100 AND >=1000x median)
     """
     absx = x.abs()
     med = absx.median(-1, keepdim=True).values  # (..., 1)
     maxmed = (absx.amax(-1) / (med.squeeze(-1) + 1e-6)).mean().item()
     n_out50 = (absx >= 50.0 * med).float().sum(-1).mean().item()
     n_sun = ((absx > 100.0) & (absx >= 1000.0 * med)).float().sum(-1).mean().item()
-    return {"norm": x.norm(dim=-1).mean().item(), "maxmed": maxmed, "n_out50": n_out50, "n_sun": n_sun}
+    absmax = absx.amax(-1).mean().item()
+    # excess kurtosis over channels, per token, averaged
+    xc = x - x.mean(-1, keepdim=True)
+    m2 = xc.pow(2).mean(-1)
+    kurt = (xc.pow(4).mean(-1) / (m2.pow(2) + 1e-8) - 3.0).mean().item()
+    # fixed-dimension signature: per-channel mean |activation| across the batch
+    feat = absx.reshape(-1, absx.shape[-1]).mean(0)  # (d,)
+    feat_maxmed = (feat.amax() / (feat.median() + 1e-6)).item()
+    return {"norm": x.norm(dim=-1).mean().item(), "maxmed": maxmed, "absmax": absmax,
+            "kurtosis": kurt, "feat_maxmed": feat_maxmed, "n_out50": n_out50, "n_sun": n_sun}
 
 
 def _state_stats(state) -> dict:

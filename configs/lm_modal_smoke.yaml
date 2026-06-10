@@ -1,0 +1,23 @@
+# Modal smoke: validates the full GPU path (image build, FineWeb streaming, training, MA
+# measurement, volume save) for cents, and caches the image for the real sweep.
+#   modal run modal_lm.py::main --config configs/lm_modal_smoke.yaml
+data: fineweb
+tokenizer: bytes
+max_tokens: 2000000
+val_tokens: 200000
+batch_size: 16
+max_steps: 20
+warmup_steps: 5
+log_every: 5
+eval_every: 10
+commit_sparsity: 0.02
+device: auto
+out_dir: outputs/lm_modal_smoke
+model:
+  n_layer: 4
+  n_head: 4
+  dim: 256
+  block_size: 256
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0
