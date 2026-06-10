@@ -14,18 +14,27 @@ from .layers import RMSNorm, CausalSelfAttention, MLP
 from .residual_ops import build_residual, init_state, decode_state
 
 
+def _act_stats(x) -> dict:
+    """Massive-activation diagnostics for one stream (Sun et al. 2024 conventions).
+
+    - norm     : mean per-token L2 norm
+    - maxmed   : mean (max|x| / median|x|)  -- scale-free MA proxy
+    - n_out50  : mean count of dims with |x| >= 50x the token's median |x|  (scale-free outliers)
+    - n_sun    : mean count of dims that are 'massive' by Sun's absolute rule (|x|>100 AND >=1000x median)
+    """
+    absx = x.abs()
+    med = absx.median(-1, keepdim=True).values  # (..., 1)
+    maxmed = (absx.amax(-1) / (med.squeeze(-1) + 1e-6)).mean().item()
+    n_out50 = (absx >= 50.0 * med).float().sum(-1).mean().item()
+    n_sun = ((absx > 100.0) & (absx >= 1000.0 * med)).float().sum(-1).mean().item()
+    return {"norm": x.norm(dim=-1).mean().item(), "maxmed": maxmed, "n_out50": n_out50, "n_sun": n_sun}
+
+
 def _state_stats(state) -> dict:
-    """Per-sublayer residual diagnostics: mean token L2 norm and the max/median activation
-    ratio (the massive-activation proxy from Sun et al. 2024)."""
-    p = state.primary
-    absp = p.abs()
-    maxmed = (absp.amax(-1) / (absp.median(-1).values + 1e-6)).mean().item()
-    rec = {"primary_norm": p.norm(dim=-1).mean().item(), "primary_maxmed": maxmed}
+    """Per-sublayer residual diagnostics for primary (and Commitment, if present)."""
+    rec = {f"primary_{k}": v for k, v in _act_stats(state.primary).items()}
     if state.secondary is not None:
-        s = state.secondary
-        abss = s.abs()
-        rec["secondary_norm"] = s.norm(dim=-1).mean().item()
-        rec["secondary_maxmed"] = (abss.amax(-1) / (abss.median(-1).values + 1e-6)).mean().item()
+        rec.update({f"secondary_{k}": v for k, v in _act_stats(state.secondary).items()})
     return rec
 
 

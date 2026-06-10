@@ -1,0 +1,27 @@
+# Headline mechanistic run on Modal (FineWeb-Edu). Base config; the sweep entrypoint overrides
+# `residual`/`qk_norm` to produce vanilla / suppress_only / ledger (matched everything else).
+#   modal run modal_lm.py::sweep --config configs/lm_fineweb.yaml
+#
+# Byte-level + ~40M params + ~165M tokens is the cheap FIRST probe (~$1-2/config, minutes on A100).
+# If massive activations don't emerge cleanly, scale up: tokenizer=gpt2, dim 768 / n_layer 24,
+# more tokens (research_plan.md §7.3). Depth is deliberately high (12) to stress depth-dilution.
+data: fineweb
+tokenizer: bytes
+max_tokens: 200000000
+val_tokens: 2000000
+batch_size: 32
+max_steps: 10000
+warmup_steps: 200
+log_every: 200
+eval_every: 2000
+commit_sparsity: 0.02
+device: auto
+out_dir: outputs/lm
+model:
+  n_layer: 12
+  n_head: 8
+  dim: 512
+  block_size: 512
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0

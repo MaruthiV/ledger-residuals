@@ -55,6 +55,28 @@ class TrainConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
 
 
+@dataclass
+class LMConfig:
+    """Language-model training config (the headline mechanistic run)."""
+    data: str = "pseudo"          # "pseudo" (local smoke) | "fineweb" (Modal)
+    tokenizer: str = "bytes"      # "bytes" | "gpt2"
+    max_tokens: int = 2_000_000
+    val_tokens: int = 200_000
+    lr: float = 3e-4
+    weight_decay: float = 0.1
+    batch_size: int = 32
+    max_steps: int = 2000
+    warmup_steps: int = 100
+    grad_clip: float = 1.0
+    commit_sparsity: float = 0.02
+    seed: int = 0
+    device: str = "auto"
+    log_every: int = 100
+    eval_every: int = 500
+    out_dir: str = "outputs/lm"
+    model: ModelConfig = field(default_factory=ModelConfig)
+
+
 def _filter(cls, d: dict) -> dict:
     valid = {f.name for f in fields(cls)}
     unknown = set(d) - valid
@@ -68,3 +90,10 @@ def load_config(path: str) -> TrainConfig:
         raw = yaml.safe_load(fh) or {}
     model_raw = raw.pop("model", {}) or {}
     return TrainConfig(model=ModelConfig(**_filter(ModelConfig, model_raw)), **_filter(TrainConfig, raw))
+
+
+def load_lm_config(path: str) -> LMConfig:
+    with open(path) as fh:
+        raw = yaml.safe_load(fh) or {}
+    model_raw = raw.pop("model", {}) or {}
+    return LMConfig(model=ModelConfig(**_filter(ModelConfig, model_raw)), **_filter(LMConfig, raw))
