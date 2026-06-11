@@ -20,6 +20,7 @@ import torch
 from .config import LMConfig, load_lm_config
 from .data.text import build_tokenizer, load_token_ids, TokenDataset
 from .model import GPT
+from .probe import run_probe
 from .utils import pick_device, set_seed, human
 
 
@@ -94,9 +95,19 @@ def train_lm(cfg: LMConfig):
             model.train()
 
     os.makedirs(cfg.out_dir, exist_ok=True)
-    with open(os.path.join(cfg.out_dir, f"lm_{mcfg.residual}{'_qk' if mcfg.qk_norm else ''}_d{mcfg.n_layer}.json"), "w") as fh:
-        json.dump({"config": mcfg.__dict__, "history": history}, fh, indent=2)
-    return model, history
+    torch.save({k: v.half() for k, v in model.state_dict().items()}, os.path.join(cfg.out_dir, "model.pt"))
+
+    probe = run_probe(model, val_data, cfg, device, gen,
+                      lambda: evaluate(model, val_data, cfg, device, gen, n_batches=20))
+    dch = probe["decoded_channel"]
+    print(f"  [probe] decoded: dom_dim persistence={dch['persistence'] if dch else None} "
+          f"bos_conc={dch['bos_concentration'] if dch else None} | "
+          f"ptq val_loss { {k: round(v, 3) for k, v in probe['ptq_val_loss'].items()} }")
+
+    tag = f"lm_{mcfg.residual}{'_qk' if mcfg.qk_norm else ''}_d{mcfg.n_layer}.json"
+    with open(os.path.join(cfg.out_dir, tag), "w") as fh:
+        json.dump({"config": mcfg.__dict__, "history": history, "probe": probe}, fh, indent=2)
+    return model, history, probe
 
 
 def main():

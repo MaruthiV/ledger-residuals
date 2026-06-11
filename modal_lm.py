@@ -42,11 +42,11 @@ def run_lm(config_yaml: str, override: dict | None = None, max_steps=None):
     from ledger.train_lm import train_lm
 
     cfg = _make_cfg(config_yaml, override, max_steps)
-    _model, history = train_lm(cfg)
+    _model, history, probe = train_lm(cfg)
     ckpt_vol.commit()
     last = history[-1] if history else {}
     return {"residual": cfg.model.residual, "qk_norm": cfg.model.qk_norm, "n_layer": cfg.model.n_layer,
-            "val_loss": last.get("val_loss"), "trace": last.get("trace")}
+            "val_loss": last.get("val_loss"), "trace": last.get("trace"), "probe": probe}
 
 
 @app.local_entrypoint()
