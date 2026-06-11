@@ -37,7 +37,7 @@ def _make_cfg(config_yaml: str, override: dict | None = None, max_steps=None):
     return cfg
 
 
-@app.function(image=image, gpu="A100-80GB", timeout=6 * 3600, volumes={"/data": data_vol, "/ckpts": ckpt_vol})
+@app.function(image=image, gpu="A100-80GB", timeout=12 * 3600, volumes={"/data": data_vol, "/ckpts": ckpt_vol})
 def run_lm(config_yaml: str, override: dict | None = None, max_steps=None):
     from ledger.train_lm import train_lm
 
@@ -69,6 +69,9 @@ def run_sweep_remote(config_yaml: str, base_out: str, max_steps=None):
         {"out_dir": f"{base_out}/vanilla", "model": {"residual": "vanilla"}},
         {"out_dir": f"{base_out}/suppress", "model": {"residual": "vanilla", "qk_norm": True}},
         {"out_dir": f"{base_out}/ledger", "model": {"residual": "ledger", "gamma": 0.0}},
+        # heavy commit-sparsity arm: tests whether forcing C to be low-occupancy prevents it from
+        # rebuilding the BOS-tied massive activation (option-2 robustness check)
+        {"out_dir": f"{base_out}/ledger_hs", "model": {"residual": "ledger", "gamma": 0.0}, "commit_sparsity": 0.3},
     ]
     calls = [(ov["out_dir"].rsplit("/", 1)[-1], run_lm.spawn(config_yaml, override=ov, max_steps=max_steps))
              for ov in overrides]

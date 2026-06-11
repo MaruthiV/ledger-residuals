@@ -1,0 +1,26 @@
+# Option-2 robustness check: bigger (dim 1024, ~290M) + more tokens than lm_125m. The sweep
+# entrypoint runs vanilla / suppress / ledger(sparsity 0.02) / ledger_hs(sparsity 0.3).
+# Question: does the decoded channel C STILL rebuild the BOS-tied fixed-dimension massive
+# activation at larger scale and under heavy commit-sparsity? (Expected: yes -> robust negative.)
+#   modal run --detach modal_lm.py::sweep --config configs/lm_scale.yaml
+data: fineweb
+tokenizer: gpt2
+max_tokens: 500000000
+val_tokens: 4000000
+batch_size: 16
+max_steps: 8000
+warmup_steps: 300
+log_every: 500
+eval_every: 4000
+commit_sparsity: 0.02
+device: auto
+out_dir: outputs/lm_scale
+model:
+  n_layer: 12
+  n_head: 16
+  dim: 1024
+  block_size: 1024
+  mlp_mult: 4
+  residual: ledger
+  gamma: 0.0
+  gate_rank: 64
