@@ -37,6 +37,9 @@ env/
 *.npz
 *.bin
 
+# ── Compiled paper / PDFs (paper itself lives in private docs/; keep all PDFs local) ──
+*.pdf
+
 # ── Modal ──
 .modal/
 
